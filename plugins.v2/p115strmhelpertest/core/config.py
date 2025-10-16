@@ -36,7 +36,7 @@ class ConfigManager(BaseModel):
         返回默认的插件数据库文件路径
         """
         return (
-            ConfigManager._get_default_plugin_config_path() / "p115strmhelper_file.db"
+            ConfigManager._get_default_plugin_config_path() / "p115strmhelpertest_file.db"
         )
 
     @staticmethod

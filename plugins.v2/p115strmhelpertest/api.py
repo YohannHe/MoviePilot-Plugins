@@ -63,7 +63,7 @@ class Api:
         self._client = client
 
         self.browse_dir_pan_api_cache = TTLCache(
-            maxsize=1024, ttl=120, region="p115strmhelper_api_browse_dir_api"
+            maxsize=1024, ttl=120, region="p115strmhelpertest_api_browse_dir_api"
         )
         self.browse_dir_pan_api_last = 0
 
@@ -89,7 +89,7 @@ class Api:
         return MachineID(machine_id=configer.MACHINE_ID)
 
     @cached(
-        region="p115strmhelper_api_get_user_storage_status", ttl=60 * 60, skip_none=True
+        region="p115strmhelpertest_api_get_user_storage_status", ttl=60 * 60, skip_none=True
     )
     def get_user_storage_status(self) -> UserStorageStatusResponse:
         """
