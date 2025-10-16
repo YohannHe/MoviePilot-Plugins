@@ -129,7 +129,7 @@ let refreshTimer = null;
 
 // 获取插件ID函数 - 返回固定的插件类名
 const getPluginId = () => {
-  return "P115StrmHelper";  // 必须与后端插件类名完全匹配
+  return "P115StrmHelperTest";  // 必须与后端插件类名完全匹配
 };
 
 // 获取数据的函数

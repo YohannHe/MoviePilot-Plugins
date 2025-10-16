@@ -100,16 +100,17 @@
             "v1.0.0": "发布"
         }
     },
-    "P115StrmHelper": {
-        "name": "115网盘STRM助手",
+    "P115StrmHelperTest": {
+        "name": "115网盘STRM助手Test",
         "description": "115网盘STRM生成一条龙服务",
         "labels": "云盘",
-        "version": "2.2.4",
+        "version": "2.2.5",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "release": true,
         "level": 1,
         "history": {
+            "v2.2.5": "增加测试日志",
             "v2.2.4": "修复秒传等待时间过短",
             "v2.2.3": "增强媒体信息文件下载，提升速度；优化分享同步生成稳定性",
             "v2.2.2": "优化生活事件监控稳定性，优化全量STRM生成运行速度，优化增量同步媒体信息文件下载速度",
@@ -297,19 +298,6 @@
             "v0.0.3": "公测",
             "v0.0.2": "测试版本，切勿使用",
             "v0.0.1": "测试版本，切勿使用"
-        }
-    },
-    "P115StrmHelperTest": {
-        "name": "115网盘STRM助手测试",
-        "description": "115网盘STRM生成一条龙服务",
-        "labels": "云盘",
-        "version": "0.0.1",
-        "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
-        "author": "DDSRem",
-        "release": true,
-        "level": 1,
-        "history": {
-            "v0.0.1": "排查目录监控不起作用的问题"
         }
     },
     "SaMediaSyncDel": {

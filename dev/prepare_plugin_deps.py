@@ -24,7 +24,7 @@ import requests
 
 
 try:
-    PLUGIN_ID = "p115strmhelper"
+    PLUGIN_ID = "p115strmhelpertest"
     PLUGIN_SOURCE_DIR = (
         Path("/Users/rem/Documents/Git/MoviePilot-Plugins/plugins.v2") / PLUGIN_ID
     )

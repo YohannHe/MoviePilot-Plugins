@@ -1050,7 +1050,7 @@ const getStatus = async () => {
   loading.value = true;
   error.value = null;
   try {
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     const result = await props.api.get(`plugin/${pluginId}/get_status`);
     // 此处 result.data 的访问方式与新模型兼容，无需修改
     if (result && result.code === 0 && result.data) {
@@ -1140,7 +1140,7 @@ const triggerFullSync = async () => {
     if (!status.enabled) throw new Error('插件未启用，请先在配置页面启用插件');
     if (!status.has_client) throw new Error('插件未配置Cookie或Cookie无效，请先在配置页面设置115 Cookie');
     if (getPathsCount(props.initialConfig?.full_sync_strm_paths) === 0) throw new Error('未配置全量同步路径，请先在配置页面设置同步路径');
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     const result = await props.api.post(`plugin/${pluginId}/full_sync`);
     if (result && result.code === 0) {
       actionMessage.value = result.msg || '全量同步任务已启动';
@@ -1166,7 +1166,7 @@ const triggerFullSyncDb = async () => {
   try {
     if (!status.enabled) throw new Error('插件未启用，请先在配置页面启用插件');
     if (!status.has_client) throw new Error('插件未配置Cookie或Cookie无效，请先在配置页面设置115 Cookie');
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     const result = await props.api.post(`plugin/${pluginId}/full_sync_db`);
     if (result && result.code === 0) {
       actionMessage.value = result.msg || '全量同步数据库任务已启动';
@@ -1266,7 +1266,7 @@ const loadDirContent = async () => {
         dirDialog.items = [];
       }
     } else {
-      const pluginId = "P115StrmHelper";
+      const pluginId = "P115StrmHelperTest";
       if (!props.initialConfig?.cookies || props.initialConfig?.cookies.trim() === '') {
         throw new Error('请先设置115 Cookie才能浏览网盘目录');
       }
@@ -1348,7 +1348,7 @@ const executeShareSync = async () => {
     if (!shareDialog.localPath) throw new Error('请先设置本地生成STRM路径');
     if (!shareDialog.shareLink && !shareDialog.shareCode) throw new Error('请输入115网盘分享链接或分享码');
     if (shareDialog.shareCode && !shareDialog.receiveCode) throw new Error('使用分享码时必须输入分享密码');
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     if (props.initialConfig) {
       props.initialConfig.user_share_link = shareDialog.shareLink;
       props.initialConfig.user_share_code = shareDialog.shareCode;
@@ -1395,7 +1395,7 @@ const fetchOfflineTasks = async ({ page, itemsPerPage }) => {
   offlineDownloadDialog.loading = true;
   offlineDownloadDialog.error = null;
   try {
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     const result = await props.api.post(`plugin/${pluginId}/offline_tasks`, {
       page: page,
       limit: itemsPerPage
@@ -1424,7 +1424,7 @@ const addOfflineTask = async () => {
   offlineDownloadDialog.adding = true;
   offlineDownloadDialog.addError = null;
   try {
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     const links = offlineDownloadDialog.links.split('\n').map(l => l.trim()).filter(Boolean);
     const result = await props.api.post(`plugin/${pluginId}/add_offline_task`, {
       links: links,
@@ -1526,7 +1526,7 @@ async function fetchUserStorageStatus() {
   storageInfo.loading = true;
   storageInfo.error = null;
   try {
-    const pluginId = "P115StrmHelper";
+    const pluginId = "P115StrmHelperTest";
     // 此接口未包裹在 ApiResponse 中，保持不变
     const response = await props.api.get(`plugin/${pluginId}/user_storage_status`);
     if (response && response.success) {
