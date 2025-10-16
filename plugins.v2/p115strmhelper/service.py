@@ -398,14 +398,24 @@ class ServiceHelper:
         """
         if not event.is_directory:
             # 文件发生变化
-            logger.debug(f"【目录上传】文件 {text}: {event_path}")
+            logger.debug(f"【目录上传】文件{text}: {event_path} | mon_path={mon_path}")
             handle_file(event_path=event_path, mon_path=mon_path)
+        else:
+            # 目录事件仅记录，不处理
+            logger.debug(f"【目录上传】目录{text}: {event_path} (忽略) | mon_path={mon_path}")
 
     def start_directory_upload(self):
         """
         启动目录上传监控
         """
         if configer.get_config("directory_upload_enabled"):
+            try:
+                paths_config = configer.get_config("directory_upload_path") or []
+                logger.info(
+                    f"【目录上传】准备启动目录监控，模式: {configer.get_config('directory_upload_mode')}，路径数: {len(paths_config)}"
+                )
+            except Exception as e:
+                logger.error(f"【目录上传】读取目录监控配置失败: {e}")
             for item in configer.get_config("directory_upload_path"):  # pylint: disable=E1133
                 if not item:
                     continue
@@ -413,12 +423,30 @@ class ServiceHelper:
                 if not mon_path:
                     continue
                 try:
+                    # 启动前校验路径
+                    try:
+                        _p = Path(mon_path)
+                        if not _p.exists():
+                            logger.warn(f"【目录上传】监控路径不存在: {mon_path}")
+                        else:
+                            logger.debug(
+                                f"【目录上传】监控路径可访问: {mon_path} | is_dir={_p.is_dir()}"
+                            )
+                    except Exception as e:
+                        logger.warn(f"【目录上传】监控路径检查异常: {mon_path} | {e}")
+
                     if configer.get_config("directory_upload_mode") == "compatibility":
                         # 兼容模式，目录同步性能降低且NAS不能休眠，但可以兼容挂载的远程共享目录如SMB
                         observer = PollingObserver(timeout=10)
+                        logger.debug(
+                            f"【目录上传】使用 PollingObserver(timeout=10) 启动监控: {mon_path}"
+                        )
                     else:
                         # 内部处理系统操作类型选择最优解
                         observer = Observer(timeout=10)
+                        logger.debug(
+                            f"【目录上传】使用 Observer(timeout=10) 启动监控: {mon_path}"
+                        )
                     self.service_observer.append(observer)
                     observer.schedule(
                         FileMonitorHandler(mon_path, self),
@@ -428,6 +456,9 @@ class ServiceHelper:
                     observer.daemon = True
                     observer.start()
                     logger.info(f"【目录上传】{mon_path} 实时监控服务启动")
+                    logger.debug(
+                        f"【目录上传】observer.schedule(path={mon_path}, recursive=True) 成功"
+                    )
                 except Exception as e:
                     err_msg = str(e)
                     if "inotify" in err_msg and "reached" in err_msg:

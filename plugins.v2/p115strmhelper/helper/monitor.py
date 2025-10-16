@@ -59,9 +59,13 @@ def handle_file(event_path: str, mon_path: str):
     :param mon_path: 监控目录
     """
     file_path = Path(event_path)
+    logger.debug(
+        f"【目录上传】处理文件开始 | event_path={event_path} | mon_path={mon_path}"
+    )
     storagechain = StorageChain()
     try:
         if not file_path.exists():
+            logger.debug(f"【目录上传】路径不存在，忽略: {event_path}")
             return
         # 全程加锁
         with directory_upload_dict[str(file_path.absolute())]:
@@ -86,21 +90,36 @@ def handle_file(event_path: str, mon_path: str):
                 return
 
             # 获取此监控目录配置
+            logger.debug("【目录上传】开始匹配监控路径配置以获取目标目录")
             for item in configer.get_config("directory_upload_path"):
                 if not item:
                     continue
                 if mon_path == item.get("src", ""):
+                    logger.debug(
+                        f"【目录上传】匹配到监控项: src={item.get('src','')} delete={item.get('delete',False)} dest_remote={item.get('dest_remote','')} dest_local={item.get('dest_local','')}"
+                    )
                     delete = item.get("delete", False)
                     dest_remote = item.get("dest_remote", "")
                     dest_local = item.get("dest_local", "")
                     break
 
-            if file_path.suffix.lower() in [
+            upload_exts = [
                 f".{ext.strip()}"
                 for ext in configer.get_config("directory_upload_uploadext")
                 .replace("，", ",")
                 .split(",")
-            ]:
+            ]
+            copy_exts = [
+                f".{ext.strip()}"
+                for ext in configer.get_config("directory_upload_copyext")
+                .replace("，", ",")
+                .split(",")
+            ]
+            logger.debug(
+                f"【目录上传】文件后缀={file_path.suffix.lower()} | 上传匹配={upload_exts} | 复制匹配={copy_exts}"
+            )
+
+            if file_path.suffix.lower() in upload_exts:
                 # 处理上传
                 if not dest_remote:
                     logger.error(f"【目录上传】{file_path} 未找到对应的上传网盘目录")
@@ -108,6 +127,9 @@ def handle_file(event_path: str, mon_path: str):
 
                 target_file_path = Path(dest_remote) / Path(file_path).relative_to(
                     mon_path
+                )
+                logger.debug(
+                    f"【目录上传】准备上传: local={file_path} -> remote_target={target_file_path}"
                 )
 
                 # 网盘目录创建流程
@@ -131,8 +153,14 @@ def handle_file(event_path: str, mon_path: str):
                     for part in target_file_path.parent.parts[1:]:
                         dir_file = __find_dir(target_fileitem, part)
                         if dir_file:
+                            logger.debug(
+                                f"【目录上传】发现已存在目录: {target_fileitem.path}{part}"
+                            )
                             target_fileitem = dir_file
                         else:
+                            logger.debug(
+                                f"【目录上传】准备创建目录: {target_fileitem.path}{part}"
+                            )
                             dir_file = storagechain.create_folder(target_fileitem, part)
                             if not dir_file:
                                 logger.error(
@@ -142,6 +170,9 @@ def handle_file(event_path: str, mon_path: str):
                             target_fileitem = dir_file
 
                 # 上传流程
+                logger.debug(
+                    f"【目录上传】开始上传文件: src={file_path} -> dest_dir={target_fileitem.path} filename={file_path.name}"
+                )
                 if storagechain.upload_file(target_fileitem, file_path, file_path.name):
                     logger.info(
                         f"【目录上传】{file_path} 上传到网盘 {target_file_path} 成功 "
@@ -150,16 +181,14 @@ def handle_file(event_path: str, mon_path: str):
                     logger.error(f"【目录上传】{file_path} 上传网盘失败")
                     return
 
-            elif file_path.suffix.lower() in [
-                f".{ext.strip()}"
-                for ext in configer.get_config("directory_upload_copyext")
-                .replace("，", ",")
-                .split(",")
-            ]:
+            elif file_path.suffix.lower() in copy_exts:
                 # 处理非上传文件
                 if dest_local:
                     target_file_path = Path(dest_local) / Path(file_path).relative_to(
                         mon_path
+                    )
+                    logger.debug(
+                        f"【目录上传】准备复制: {file_path} -> {target_file_path}"
                     )
                     # 创建本地目录
                     target_file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,6 +203,9 @@ def handle_file(event_path: str, mon_path: str):
                         return
             else:
                 # 未匹配后缀的文件直接跳过
+                logger.debug(
+                    f"【目录上传】未匹配到上传/复制后缀，跳过: {file_path.suffix.lower()}"
+                )
                 return
 
             # 处理源文件是否删除
