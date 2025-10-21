@@ -101,15 +101,16 @@
         }
     },
     "P115StrmHelperTest": {
-        "name": "115网盘STRM助手Test",
+        "name": "定制115网盘STRM助手Test",
         "description": "115网盘STRM生成一条龙服务",
         "labels": "云盘",
-        "version": "2.2.6",
+        "version": "2.2.7",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "release": true,
         "level": 1,
         "history": {
+            "v2.2.7": "增加队列机制，完善日志",
             "v2.2.6": "日志级别提升为info",
             "v2.2.5": "增加测试日志",
             "v2.2.4": "修复秒传等待时间过短",

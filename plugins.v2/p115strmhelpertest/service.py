@@ -18,7 +18,8 @@ from .core.p115 import get_pid_by_path
 from .helper.mediainfo_download import MediaInfoDownloader
 from .helper.life import MonitorLife
 from .helper.strm import FullSyncStrmHelper, ShareStrmHelper, IncrementSyncStrmHelper
-from .helper.monitor import handle_file, FileMonitorHandler
+from .helper.monitor import enqueue_file, FileMonitorHandler
+from .helper.upload_queue_processor import UploadQueueProcessor
 from .helper.offline import OfflineDownloadHelper
 from .helper.share import ShareTransferHelper
 from .helper.clean import Cleaner
@@ -46,6 +47,9 @@ class ServiceHelper:
         self.aligo: Optional[BAligo] = None
 
         self.sharetransferhelper: Optional[ShareTransferHelper] = None
+        
+        # 新增：上传队列处理器
+        self.upload_queue_processor: Optional[UploadQueueProcessor] = None
 
         self.monitor_stop_event = Event()
         self.monitor_life_thread: Optional[Thread] = None
@@ -390,25 +394,37 @@ class ServiceHelper:
 
     def event_handler(self, event, mon_path: str, text: str, event_path: str):
         """
-        处理文件变化
+        处理文件变化（加入队列）
         :param event: 事件
         :param mon_path: 监控目录
         :param text: 事件描述
         :param event_path: 事件文件路径
         """
         if not event.is_directory:
-            # 文件发生变化
+            # 文件发生变化，加入队列
             logger.info(f"【目录上传】文件{text}: {event_path} | mon_path={mon_path}")
-            handle_file(event_path=event_path, mon_path=mon_path)
+            enqueue_file(event_path=event_path, mon_path=mon_path)
         else:
             # 目录事件仅记录，不处理
-            logger.info(f"【目录上传】目录{text}: {event_path} (忽略) | mon_path={mon_path}")
+            logger.debug(f"【目录上传】目录{text}: {event_path} (忽略) | mon_path={mon_path}")
 
     def start_directory_upload(self):
         """
-        启动目录上传监控
+        启动目录上传监控（队列化版本）
         """
         if configer.get_config("directory_upload_enabled"):
+            
+            # === 新增：初始化队列处理器 ===
+            logger.info("【目录上传】初始化队列处理器...")
+            self.upload_queue_processor = UploadQueueProcessor()
+            
+            # 重置僵尸任务
+            self.upload_queue_processor.reset_stale_tasks()
+            
+            # 输出队列统计
+            stats = self.upload_queue_processor.get_queue_stats()
+            
+            # === 原有的监控启动逻辑 ===
             try:
                 paths_config = configer.get_config("directory_upload_path") or []
                 logger.info(
@@ -474,6 +490,38 @@ class ServiceHelper:
                         logger.error(
                             f"【目录上传】{mon_path} 启动实时监控失败：{err_msg}"
                         )
+            
+            # === 新增：启动队列处理定时任务 ===
+            if self.scheduler and self.upload_queue_processor:
+                self.scheduler.add_job(
+                    func=self.process_upload_queue,
+                    trigger='interval',
+                    seconds=30,  # 每30秒处理一次队列
+                    id='upload_queue_processor',
+                    name='上传队列处理器',
+                    misfire_grace_time=10,
+                )
+                logger.info("【队列处理器】定时任务已启动 | 间隔: 30秒")
+            else:
+                if not self.scheduler:
+                    logger.warning("【队列处理器】调度器未初始化，无法启动定时任务")
+                if not self.upload_queue_processor:
+                    logger.warning("【队列处理器】处理器未初始化")
+
+    def process_upload_queue(self):
+        """
+        队列处理任务（定时调用）
+        每30秒执行一次，处理一个待处理任务
+        """
+        try:
+            if self.upload_queue_processor:
+                logger.debug("【队列处理器】执行定时任务...")
+                processed = self.upload_queue_processor.process_one_task()
+                if processed:
+                    logger.debug("【队列处理器】本次处理完成")
+                # else: 队列为空，不输出日志（避免刷屏）
+        except Exception as e:
+            logger.error(f"【队列处理器】定时任务异常: {str(e)}\n{traceback}")
 
     def main_cleaner(self):
         """
@@ -509,6 +557,13 @@ class ServiceHelper:
                         logger.error(f"【目录上传】关闭失败: {e}")
                 logger.info("【目录上传】目录监控已关闭")
             self.service_observer = []
+            
+            # === 新增：停止队列处理器 ===
+            if self.upload_queue_processor:
+                logger.info("【队列处理器】正在关闭...")
+                self.upload_queue_processor = None
+                logger.info("【队列处理器】已关闭")
+            
             if self.scheduler:
                 self.scheduler.remove_all_jobs()
                 if self.scheduler.running:
