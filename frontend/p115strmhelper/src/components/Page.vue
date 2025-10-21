@@ -4,7 +4,7 @@
       <!-- 标题区域 -->
       <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 bg-primary-gradient">
         <v-icon icon="mdi-file-link" class="mr-2" color="primary" size="small" />
-        <span>115网盘STRM助手</span>
+        <span>定制115网盘STRM助手</span>
       </v-card-title>
 
       <!-- 通知区域 -->

@@ -40,7 +40,7 @@ class UploadQueueProcessor:
         这些任务可能是上次程序异常退出时遗留的
         """
         logger.info("【队列处理器】检查僵尸任务...")
-        count = UploadQueue.reset_processing_tasks()
+        count = UploadQueue.reset_processing_tasks(db=None)
         
         if count > 0:
             logger.info(f"【队列处理器】重置了 {count} 个僵尸任务为待处理状态")
@@ -62,7 +62,7 @@ class UploadQueueProcessor:
         
         try:
             # 1. 获取任务
-            task = UploadQueue.get_next_pending_task()
+            task = UploadQueue.get_next_pending_task(db=None)
             if not task:
                 # 队列为空，不输出日志（避免刷屏）
                 return False
@@ -75,22 +75,22 @@ class UploadQueueProcessor:
             )
 
             # 2. 标记为处理中
-            UploadQueue.mark_as_processing(task.id)
+            UploadQueue.mark_as_processing(db=None, task_id=task.id)
 
             # 3. 检查文件是否存在
             file_path = Path(task.file_path)
             if not file_path.exists():
                 logger.warning(f"【队列处理】文件不存在，标记失败: {task.file_path}")
-                UploadQueue.mark_as_failed(task.id, "文件不存在", task.retry_count)
+                UploadQueue.mark_as_failed(db=None, task_id=task.id, error_msg="文件不存在", retry_count=task.retry_count)
                 return True
 
             # 4. 二次去重检查（防止并发情况）
             fingerprint = f"{task.file_size}_{task.file_mtime}"
-            if UploadHistory.is_uploaded(fingerprint, task.file_size):
+            if UploadHistory.is_uploaded(db=None, fingerprint=fingerprint, file_size=task.file_size):
                 logger.info(
                     f"【队列处理】文件已上传过（历史去重），跳过: {task.file_name}"
                 )
-                UploadQueue.mark_as_completed(task.id)
+                UploadQueue.mark_as_completed(db=None, task_id=task.id)
                 return True
 
             # 5. 执行上传/复制
@@ -99,10 +99,11 @@ class UploadQueueProcessor:
             # 6. 更新状态
             if success:
                 logger.info(f"【队列处理】✓ 任务执行成功: {task.file_name}")
-                UploadQueue.mark_as_completed(task.id)
+                UploadQueue.mark_as_completed(db=None, task_id=task.id)
                 
                 # 记录到历史表
                 UploadHistory.record_upload(
+                    db=None,
                     fingerprint=fingerprint,
                     file_size=task.file_size,
                     file_path=task.file_path,
@@ -124,12 +125,12 @@ class UploadQueueProcessor:
                     logger.warning(
                         f"【队列处理】✗ 任务失败，将重试 ({retry_count}/3): {error_msg}"
                     )
-                    UploadQueue.mark_as_pending_retry(task.id, retry_count)
+                    UploadQueue.mark_as_pending_retry(db=None, task_id=task.id, retry_count=retry_count)
                 else:
                     logger.error(
                         f"【队列处理】✗ 任务失败，已达最大重试次数: {error_msg}"
                     )
-                    UploadQueue.mark_as_failed(task.id, error_msg, retry_count)
+                    UploadQueue.mark_as_failed(db=None, task_id=task.id, error_msg=error_msg, retry_count=retry_count)
 
             return True
 
@@ -335,7 +336,7 @@ class UploadQueueProcessor:
         
         :return: 状态统计字典
         """
-        stats = UploadQueue.count_by_status()
+        stats = UploadQueue.count_by_status(db=None)
         
         logger.info(
             f"【队列统计】待处理: {stats.get('pending', 0)} | "

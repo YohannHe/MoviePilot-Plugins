@@ -189,14 +189,14 @@ def enqueue_file(event_path: str, mon_path: str):
             # === 3. 去重检查 ===
             
             # 3.1 检查历史记录
-            if UploadHistory.is_uploaded(fingerprint, file_size):
+            if UploadHistory.is_uploaded(db=None, fingerprint=fingerprint, file_size=file_size):
                 logger.info(
                     f"【目录上传】文件已上传过（历史去重），跳过: {file_path.name}"
                 )
                 return
 
             # 3.2 检查队列
-            if UploadQueue.exists_in_queue(str(file_path)):
+            if UploadQueue.exists_in_queue(db=None, file_path=str(file_path)):
                 logger.info(
                     f"【目录上传】文件已在队列中，跳过: {file_path.name}"
                 )
@@ -294,6 +294,7 @@ def enqueue_file(event_path: str, mon_path: str):
             logger.info(f"【目录上传】准备加入队列: {file_path.name}")
             
             UploadQueue.create_task(
+                db=None,
                 file_path=str(file_path),
                 file_name=file_path.name,
                 file_size=file_size,
