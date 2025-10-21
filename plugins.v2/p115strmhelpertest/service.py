@@ -492,7 +492,13 @@ class ServiceHelper:
                         )
             
             # === 新增：启动队列处理定时任务 ===
-            if self.scheduler and self.upload_queue_processor:
+            if self.upload_queue_processor:
+                # 如果调度器还没有初始化，先初始化它
+                if not self.scheduler:
+                    logger.info("【队列处理器】初始化调度器...")
+                    self.scheduler = BackgroundScheduler(timezone=settings.TZ)
+                
+                # 添加队列处理定时任务
                 self.scheduler.add_job(
                     func=self.process_upload_queue,
                     trigger='interval',
@@ -501,12 +507,15 @@ class ServiceHelper:
                     name='上传队列处理器',
                     misfire_grace_time=10,
                 )
+                
+                # 如果调度器还没有启动，启动它
+                if not self.scheduler.running:
+                    self.scheduler.start()
+                    logger.info("【队列处理器】调度器已启动")
+                
                 logger.info("【队列处理器】定时任务已启动 | 间隔: 30秒")
             else:
-                if not self.scheduler:
-                    logger.warning("【队列处理器】调度器未初始化，无法启动定时任务")
-                if not self.upload_queue_processor:
-                    logger.warning("【队列处理器】处理器未初始化")
+                logger.warning("【队列处理器】处理器未初始化，无法启动定时任务")
 
     def process_upload_queue(self):
         """
