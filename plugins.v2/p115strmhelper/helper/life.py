@@ -1,6 +1,6 @@
 from shutil import rmtree
 from collections import defaultdict
-from threading import Timer, Lock
+from threading import Timer, Lock, current_thread
 from time import sleep, strftime, localtime, time
 from typing import List, Set, Dict, Optional
 from pathlib import Path
@@ -908,11 +908,22 @@ class MonitorLife:
         """
         处理单个事件（从延迟队列调用）
         """
+        # 🔔 诊断日志1: 确认Timer触发
+        logger.info(
+            f"【监控生活事件】🚀 Timer触发！准备处理事件: {BEHAVIOR_TYPE_TO_NAME.get(event.get('type'), '未知类型')} - "
+            f"{event.get('file_name', 'unknown')} | Thread={current_thread().name}"
+        )
+        
         event_key = f"{event['type']}_{event['file_id']}_{event['update_time']}"
+        
+        # 🔔 诊断日志2: 准备获取锁
+        logger.info(f"【监控生活事件】⏳ 等待获取处理锁... | event_key={event_key}")
         
         try:
             # 线程安全：使用锁保护整个处理流程
             with self._event_processing_lock:
+                # 🔔 诊断日志3: 成功获取锁
+                logger.info(f"【监控生活事件】✅ 获取到处理锁，开始处理 | event_key={event_key}")
                 # 初始化配置
                 self.rmt_mediaext = [
                     f".{ext.strip()}"
@@ -1031,9 +1042,16 @@ class MonitorLife:
                 f"文件={event.get('file_name', 'unknown')}: {e}"
             )
         finally:
+            # 🔔 诊断日志4: 处理完成
+            logger.info(f"【监控生活事件】🏁 事件处理完成，准备从队列移除 | event_key={event_key}")
+            
             # 处理完成后从延迟队列中移除
             with self._delayed_events_lock:
-                self._delayed_events.pop(event_key, None)
+                removed = self._delayed_events.pop(event_key, None)
+                if removed:
+                    logger.info(f"【监控生活事件】✓ 已从延迟队列移除 | 剩余队列大小: {len(self._delayed_events)}")
+                else:
+                    logger.warning(f"【监控生活事件】⚠️ 事件键不在队列中 | event_key={event_key}")
 
     def _schedule_delayed_processing(self, event: Dict):
         """
@@ -1058,6 +1076,12 @@ class MonitorLife:
                 timer = Timer(delay_seconds, self._process_event, args=(event,))
                 self._delayed_events[event_key] = timer
                 timer.start()
+                
+                # 🔔 诊断日志: Timer创建信息
+                logger.info(
+                    f"【监控生活事件】⏰ Timer已创建并启动 | name={timer.name}, is_alive={timer.is_alive()}, "
+                    f"daemon={timer.daemon}, event_key={event_key}"
+                )
                 
                 # 监控队列大小
                 queue_size = len(self._delayed_events)
