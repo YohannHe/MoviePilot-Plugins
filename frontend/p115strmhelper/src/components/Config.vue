@@ -546,6 +546,14 @@
                     <v-col cols="12" md="3">
                       <v-switch v-model="config.monitor_life_remove_mp_source" label="同步删除源文件" color="warning"
                         @change="value => { if (value) config.monitor_life_remove_mp_history = true }"></v-switch>
+`                    </v-col>
+                  </v-row>
+
+                  <v-row>
+                    <v-col cols="12" md="4">
+                      <v-text-field v-model.number="config.monitor_life_delay_seconds" label="事件延迟处理时间（秒）"
+                        hint="事件触发后延迟指定时间再处理，避免改名导致的数据不一致。设为0则不延迟" persistent-hint density="compact"
+                        type="number" min="0" clearable></v-text-field>
                     </v-col>
                   </v-row>
 
@@ -1591,6 +1599,7 @@ const config = reactive({
   monitor_life_remove_mp_history: false,
   monitor_life_remove_mp_source: false,
   monitor_life_min_file_size: 0,
+  monitor_life_delay_seconds: 60,
   share_strm_auto_download_mediainfo_enabled: false,
   user_share_code: '',
   user_receive_code: '',

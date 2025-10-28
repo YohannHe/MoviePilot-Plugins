@@ -228,6 +228,8 @@ class ConfigManager(BaseModel):
     monitor_life_min_file_size: Optional[int] = None
     # 生活事件启动拉取模式
     monitor_life_first_pull_mode: str = Field("latest", min_length=1)
+    # 生活事件延迟处理时间（秒）
+    monitor_life_delay_seconds: int = 60
 
     # 分享生成 STRM 运行开关
     share_strm_auto_download_mediainfo_enabled: bool = False

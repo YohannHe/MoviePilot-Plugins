@@ -1,6 +1,6 @@
 from shutil import rmtree
 from collections import defaultdict
-from threading import Timer
+from threading import Timer, Lock
 from time import sleep, strftime, localtime, time
 from typing import List, Set, Dict, Optional
 from pathlib import Path
@@ -93,6 +93,13 @@ class MonitorLife:
             mediaservers=configer.monitor_life_mediaservers,
         )
 
+        # 延迟处理队列（事件ID -> Timer对象）
+        self._delayed_events: Dict[str, Timer] = {}
+        # 延迟队列锁
+        self._delayed_events_lock = Lock()
+        # 事件处理锁（保护关键处理流程）
+        self._event_processing_lock = Lock()
+
     def _schedule_notification(self):
         """
         安排通知发送，如果一分钟内没有新事件则发送
@@ -159,6 +166,27 @@ class MonitorLife:
             return Path(dir_path)
         logger.debug(f"获取 {cid} 路径（缓存）: {dir_path}")
         return Path(dir_path)
+
+    def _get_latest_file_info(self, file_id: int, file_category: int) -> Optional[Dict]:
+        """
+        通过file_id获取最新文件信息（重新从API获取，确保文件名是最新的）
+        """
+        try:
+            resp = self._client.fs_info(file_id)
+            
+            if resp and resp.get('data'):
+                data = resp['data'][0] if isinstance(resp['data'], list) else resp['data']
+                return {
+                    'file_id': data.get('fid', file_id),
+                    'file_name': data.get('n', data.get('name', '')),
+                    'file_category': data.get('fc', data.get('file_category', file_category)),
+                    'parent_id': data.get('pid', data.get('cid', 0)),
+                    'file_size': data.get('s', data.get('size', 0)),
+                    'pick_code': data.get('pc', data.get('pickcode', ''))
+                }
+        except Exception as e:
+            logger.warning(f"【监控生活事件】重新获取文件信息失败 file_id={file_id}: {e}")
+        return None
 
     def media_transfer(self, event: Dict, file_path: Path, rmt_mediaext):
         """
@@ -863,87 +891,231 @@ class MonitorLife:
         db_helper.upsert_batch_by_list(events_batch)
 
         for event in reversed(events_batch):
-            self.rmt_mediaext = [
-                f".{ext.strip()}"
-                for ext in configer.get_config("user_rmt_mediaext")
-                .replace("，", ",")
-                .split(",")
-            ]
-            self.rmt_mediaext_set = set(self.rmt_mediaext)
-            self.download_mediaext_set = {
-                f".{ext.strip()}"
-                for ext in configer.get_config("user_download_mediaext")
-                .replace("，", ",")
-                .split(",")
-            }
-
+            # 加入延迟队列而不是立即处理
+            self._schedule_delayed_processing(event)
+        
+        # 输出队列状态（用于监控）
+        queue_status = self.get_queue_status()
+        if queue_status["queue_size"] > 0:
             logger.debug(
-                f"【监控生活事件】{BEHAVIOR_TYPE_TO_NAME.get(event['type'], '未知类型')}: {event}"
+                f"【监控生活事件】当前延迟队列状态: {queue_status['queue_size']} 个事件待处理 "
+                f"[{queue_status['status']}]"
             )
-
-            if (
-                int(event["type"]) != 1
-                and int(event["type"]) != 2
-                and int(event["type"]) != 5
-                and int(event["type"]) != 6
-                and int(event["type"]) != 14
-                and int(event["type"]) != 17
-                and int(event["type"]) != 18
-                and int(event["type"]) != 22
-            ):
-                continue
-
-            if (
-                int(event["type"]) == 1
-                or int(event["type"]) == 2
-                or int(event["type"]) == 5
-                or int(event["type"]) == 6
-                or int(event["type"]) == 14
-                or int(event["type"]) == 18
-            ):
-                # 新路径事件处理
-                self.new_creata_path(event=event)
-
-            if int(event["type"]) == 22:
-                # 删除文件/文件夹事件处理
-                if str(event["file_id"]) in pantransfercacher.delete_pan_transfer_list:
-                    # 检查是否命中删除文件夹缓存，命中则无需处理
-                    pantransfercacher.delete_pan_transfer_list.remove(
-                        str(event["file_id"])
-                    )
-                else:
-                    if (
-                        configer.get_config("monitor_life_enabled")
-                        and configer.get_config("monitor_life_paths")
-                        and "remove" in configer.get_config("monitor_life_event_modes")  # pylint: disable=E1135
-                    ):
-                        self.remove_strm(event=event)
-
-            if int(event["type"]) == 17:
-                # 对于创建文件夹事件直接写入数据库
-                _databasehelper = FileDbHelper()
-                file_name = event["file_name"]
-                dir_path = self._get_path_by_cid(int(event["parent_id"]))
-                file_path = Path(dir_path) / file_name
-                # 待整理目录跳过处理
-                if configer.pan_transfer_enabled and configer.pan_transfer_paths:
-                    if PathUtils.get_run_transfer_path(
-                        paths=configer.pan_transfer_paths,
-                        transfer_path=file_path.as_posix(),
-                    ):
-                        continue
-                # 未识别目录跳过处理
-                if configer.pan_transfer_unrecognized_path:
-                    if PathUtils.has_prefix(
-                        file_path.as_posix(), configer.pan_transfer_unrecognized_path
-                    ):
-                        continue
-                _databasehelper.upsert_batch(
-                    _databasehelper.process_life_dir_item(
-                        event=event, file_path=file_path
-                    )
-                )
+        
         return return_from_time, return_from_id
+
+    def _process_event(self, event: Dict):
+        """
+        处理单个事件（从延迟队列调用）
+        """
+        event_key = f"{event['type']}_{event['file_id']}_{event['update_time']}"
+        
+        try:
+            # 线程安全：使用锁保护整个处理流程
+            with self._event_processing_lock:
+                # 初始化配置
+                self.rmt_mediaext = [
+                    f".{ext.strip()}"
+                    for ext in configer.get_config("user_rmt_mediaext")
+                    .replace("，", ",")
+                    .split(",")
+                ]
+                self.rmt_mediaext_set = set(self.rmt_mediaext)
+                self.download_mediaext_set = {
+                    f".{ext.strip()}"
+                    for ext in configer.get_config("user_download_mediaext")
+                    .replace("，", ",")
+                    .split(",")
+                }
+
+                # 对于单文件事件（file_category != 0），重新获取最新文件信息
+                if event.get('file_category') != 0:
+                    try:
+                        latest_info = self._get_latest_file_info(
+                            int(event['file_id']), 
+                            int(event['file_category'])
+                        )
+                        if latest_info:
+                            # 更新事件中的文件名等信息
+                            old_name = event.get('file_name')
+                            event['file_name'] = latest_info['file_name']
+                            event['pick_code'] = latest_info.get('pick_code', event.get('pick_code'))
+                            event['file_size'] = latest_info.get('file_size', event.get('file_size'))
+                            
+                            if old_name != event['file_name']:
+                                logger.info(
+                                    f"【监控生活事件】检测到文件名变化: {old_name} -> {event['file_name']}"
+                                )
+                    except Exception as e:
+                        logger.warning(f"【监控生活事件】获取最新文件信息异常: {e}")
+
+                logger.debug(
+                    f"【监控生活事件】{BEHAVIOR_TYPE_TO_NAME.get(event['type'], '未知类型')}: {event}"
+                )
+
+                if (
+                    int(event["type"]) != 1
+                    and int(event["type"]) != 2
+                    and int(event["type"]) != 5
+                    and int(event["type"]) != 6
+                    and int(event["type"]) != 14
+                    and int(event["type"]) != 17
+                    and int(event["type"]) != 18
+                    and int(event["type"]) != 22
+                ):
+                    return
+
+                if (
+                    int(event["type"]) == 1
+                    or int(event["type"]) == 2
+                    or int(event["type"]) == 5
+                    or int(event["type"]) == 6
+                    or int(event["type"]) == 14
+                    or int(event["type"]) == 18
+                ):
+                    # 新路径事件处理
+                    try:
+                        self.new_creata_path(event=event)
+                    except Exception as e:
+                        logger.error(f"【监控生活事件】处理新增事件失败 {event.get('file_name', '')}: {e}")
+
+                if int(event["type"]) == 22:
+                    # 删除文件/文件夹事件处理
+                    try:
+                        if str(event["file_id"]) in pantransfercacher.delete_pan_transfer_list:
+                            # 检查是否命中删除文件夹缓存，命中则无需处理
+                            pantransfercacher.delete_pan_transfer_list.remove(
+                                str(event["file_id"])
+                            )
+                        else:
+                            if (
+                                configer.get_config("monitor_life_enabled")
+                                and configer.get_config("monitor_life_paths")
+                                and "remove" in configer.get_config("monitor_life_event_modes")  # pylint: disable=E1135
+                            ):
+                                self.remove_strm(event=event)
+                    except Exception as e:
+                        logger.error(f"【监控生活事件】处理删除事件失败 {event.get('file_name', '')}: {e}")
+
+                if int(event["type"]) == 17:
+                    # 对于创建文件夹事件直接写入数据库
+                    try:
+                        _databasehelper = FileDbHelper()
+                        file_name = event["file_name"]
+                        dir_path = self._get_path_by_cid(int(event["parent_id"]))
+                        file_path = Path(dir_path) / file_name
+                        # 待整理目录跳过处理
+                        if configer.pan_transfer_enabled and configer.pan_transfer_paths:
+                            if PathUtils.get_run_transfer_path(
+                                paths=configer.pan_transfer_paths,
+                                transfer_path=file_path.as_posix(),
+                            ):
+                                return
+                        # 未识别目录跳过处理
+                        if configer.pan_transfer_unrecognized_path:
+                            if PathUtils.has_prefix(
+                                file_path.as_posix(), configer.pan_transfer_unrecognized_path
+                            ):
+                                return
+                        _databasehelper.upsert_batch(
+                            _databasehelper.process_life_dir_item(
+                                event=event, file_path=file_path
+                            )
+                        )
+                    except Exception as e:
+                        logger.error(f"【监控生活事件】处理创建文件夹事件失败 {event.get('file_name', '')}: {e}")
+        
+        except Exception as e:
+            logger.error(
+                f"【监控生活事件】处理事件失败 类型={BEHAVIOR_TYPE_TO_NAME.get(event.get('type'), '未知')} "
+                f"文件={event.get('file_name', 'unknown')}: {e}"
+            )
+        finally:
+            # 处理完成后从延迟队列中移除
+            with self._delayed_events_lock:
+                self._delayed_events.pop(event_key, None)
+
+    def _schedule_delayed_processing(self, event: Dict):
+        """
+        将事件加入延迟处理队列
+        """
+        try:
+            delay_seconds = configer.monitor_life_delay_seconds or 0
+            if delay_seconds <= 0:
+                # 不延迟，直接处理
+                self._process_event(event)
+                return
+            
+            event_key = f"{event['type']}_{event['file_id']}_{event['update_time']}"
+            
+            with self._delayed_events_lock:
+                # 如果已存在相同事件的定时器，取消旧的
+                if event_key in self._delayed_events:
+                    self._delayed_events[event_key].cancel()
+                    logger.debug(f"【监控生活事件】取消重复事件的旧定时器: {event_key}")
+                
+                # 创建新的定时器
+                timer = Timer(delay_seconds, self._process_event, args=(event,))
+                self._delayed_events[event_key] = timer
+                timer.start()
+                
+                # 监控队列大小
+                queue_size = len(self._delayed_events)
+                
+            logger.info(
+                f"【监控生活事件】事件已加入延迟队列 [队列大小: {queue_size}]，将在 {delay_seconds} 秒后处理: "
+                f"{BEHAVIOR_TYPE_TO_NAME.get(event['type'], '未知类型')} - {event.get('file_name', '')}"
+            )
+            
+            # 队列大小警告
+            if queue_size > 50:
+                logger.warning(f"【监控生活事件】延迟队列积压较多: {queue_size} 个事件待处理")
+            elif queue_size > 100:
+                logger.error(f"【监控生活事件】延迟队列积压严重: {queue_size} 个事件待处理，可能存在处理瓶颈")
+        
+        except Exception as e:
+            logger.error(f"【监控生活事件】加入延迟队列失败: {e}")
+            # 失败时尝试直接处理
+            try:
+                self._process_event(event)
+            except Exception as e2:
+                logger.error(f"【监控生活事件】降级处理也失败: {e2}")
+
+    def get_queue_status(self) -> Dict:
+        """
+        获取延迟队列状态
+        """
+        try:
+            with self._delayed_events_lock:
+                queue_size = len(self._delayed_events)
+                return {
+                    "queue_size": queue_size,
+                    "status": "normal" if queue_size < 50 else ("warning" if queue_size < 100 else "critical")
+                }
+        except Exception as e:
+            logger.error(f"【监控生活事件】获取队列状态失败: {e}")
+            return {"queue_size": -1, "status": "error"}
+
+    def stop(self):
+        """
+        停止监控，清理所有延迟定时器
+        """
+        try:
+            with self._delayed_events_lock:
+                pending_count = len(self._delayed_events)
+                if pending_count > 0:
+                    logger.info(f"【监控生活事件】正在清理 {pending_count} 个延迟定时器...")
+                    for event_key, timer in self._delayed_events.items():
+                        try:
+                            timer.cancel()
+                        except Exception as e:
+                            logger.warning(f"【监控生活事件】取消定时器失败 {event_key}: {e}")
+                    self._delayed_events.clear()
+                    logger.info(f"【监控生活事件】已清理所有延迟定时器 (共 {pending_count} 个)")
+                else:
+                    logger.debug("【监控生活事件】无需清理延迟定时器")
+        except Exception as e:
+            logger.error(f"【监控生活事件】清理延迟定时器异常: {e}")
 
     def check_status(self):
         """

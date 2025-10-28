@@ -148,6 +148,7 @@ class ServiceHelper:
             while True:
                 if self.monitor_stop_event.is_set():
                     logger.info("【监控生活事件】收到停止信号，退出上传事件监控")
+                    self.monitorlife.stop()  # 清理延迟定时器
                     configer.save_plugin_data(
                         "monitor_life_strm_files",
                         {"from_time": from_time, "from_id": from_id},
@@ -158,9 +159,12 @@ class ServiceHelper:
                 )
         except Exception as e:
             logger.error(f"【监控生活事件】生活事件监控运行失败: {e}")
+            self.monitorlife.stop()  # 清理延迟定时器
             logger.info("【监控生活事件】30s 后尝试重新启动生活事件监控")
             sleep(30)
             self.monitor_life_strm_files()
+        finally:
+            self.monitorlife.stop()  # 确保清理延迟定时器
         logger.info("【监控生活事件】已退出生活事件监控")
         return
 
