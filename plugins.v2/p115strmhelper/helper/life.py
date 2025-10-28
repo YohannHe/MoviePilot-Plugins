@@ -985,31 +985,67 @@ class MonitorLife:
                     or int(event["type"]) == 18
                 ):
                     # 新路径事件处理
+                    logger.info(
+                        f"【监控生活事件】📝 开始处理新增事件 | type={event['type']}, "
+                        f"file_name={event.get('file_name')}"
+                    )
                     try:
                         self.new_creata_path(event=event)
+                        logger.info(f"【监控生活事件】✓ new_creata_path 执行完成")
                     except Exception as e:
                         logger.error(f"【监控生活事件】处理新增事件失败 {event.get('file_name', '')}: {e}")
 
                 if int(event["type"]) == 22:
                     # 删除文件/文件夹事件处理
+                    logger.info(
+                        f"【监控生活事件】📋 开始处理删除事件 | file_id={event.get('file_id')}, "
+                        f"file_name={event.get('file_name')}"
+                    )
+                    
                     try:
                         if str(event["file_id"]) in pantransfercacher.delete_pan_transfer_list:
                             # 检查是否命中删除文件夹缓存，命中则无需处理
+                            logger.info(
+                                f"【监控生活事件】⏭️ 命中删除缓存，跳过处理 | file_id={event['file_id']}"
+                            )
                             pantransfercacher.delete_pan_transfer_list.remove(
                                 str(event["file_id"])
                             )
                         else:
+                            logger.info(f"【监控生活事件】🔍 未命中删除缓存，检查配置...")
+                            
+                            monitor_enabled = configer.get_config("monitor_life_enabled")
+                            monitor_paths = configer.get_config("monitor_life_paths")
+                            event_modes = configer.get_config("monitor_life_event_modes")
+                            
+                            logger.info(
+                                f"【监控生活事件】配置检查: enabled={monitor_enabled}, "
+                                f"has_paths={bool(monitor_paths)}, event_modes={event_modes}, "
+                                f"remove_in_modes={'remove' in event_modes if event_modes else False}"
+                            )
+                            
                             if (
-                                configer.get_config("monitor_life_enabled")
-                                and configer.get_config("monitor_life_paths")
-                                and "remove" in configer.get_config("monitor_life_event_modes")  # pylint: disable=E1135
+                                monitor_enabled
+                                and monitor_paths
+                                and "remove" in event_modes  # pylint: disable=E1135
                             ):
+                                logger.info(f"【监控生活事件】✅ 配置检查通过，调用 remove_strm")
                                 self.remove_strm(event=event)
+                                logger.info(f"【监控生活事件】✓ remove_strm 执行完成")
+                            else:
+                                logger.warning(
+                                    f"【监控生活事件】❌ 配置检查不通过，跳过删除 | "
+                                    f"enabled={monitor_enabled}, paths={bool(monitor_paths)}, "
+                                    f"remove_mode={'remove' in event_modes if event_modes else False}"
+                                )
                     except Exception as e:
                         logger.error(f"【监控生活事件】处理删除事件失败 {event.get('file_name', '')}: {e}")
 
                 if int(event["type"]) == 17:
                     # 对于创建文件夹事件直接写入数据库
+                    logger.info(
+                        f"【监控生活事件】📁 开始处理创建文件夹事件 | file_name={event.get('file_name')}"
+                    )
                     try:
                         _databasehelper = FileDbHelper()
                         file_name = event["file_name"]
@@ -1021,18 +1057,21 @@ class MonitorLife:
                                 paths=configer.pan_transfer_paths,
                                 transfer_path=file_path.as_posix(),
                             ):
+                                logger.info(f"【监控生活事件】⏭️ 命中待整理目录，跳过")
                                 return
                         # 未识别目录跳过处理
                         if configer.pan_transfer_unrecognized_path:
                             if PathUtils.has_prefix(
                                 file_path.as_posix(), configer.pan_transfer_unrecognized_path
                             ):
+                                logger.info(f"【监控生活事件】⏭️ 命中未识别目录，跳过")
                                 return
                         _databasehelper.upsert_batch(
                             _databasehelper.process_life_dir_item(
                                 event=event, file_path=file_path
                             )
                         )
+                        logger.info(f"【监控生活事件】✓ 创建文件夹事件处理完成")
                     except Exception as e:
                         logger.error(f"【监控生活事件】处理创建文件夹事件失败 {event.get('file_name', '')}: {e}")
         
