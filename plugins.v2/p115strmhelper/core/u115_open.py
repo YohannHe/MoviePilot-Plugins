@@ -907,6 +907,40 @@ class U115OpenHelper:
             logger.debug(f"【P115Open】OpenAPI 获取文件信息失败: {str(e)}")
             return None
 
+    def open_get_item_by_id(self, file_id: int) -> Optional[schemas.FileItem]:
+        """
+        通过文件ID获取文件/目录项 OpenAPI
+        """
+        try:
+            resp = self._request_api(
+                "GET",
+                "/open/folder/get_info",
+                "data",
+                params={"file_id": file_id},
+                no_error_log=True,
+            )
+            if not resp:
+                return None
+            logger.debug(f"【P115Open】OpenAPI 通过ID获取文件信息 file_id={file_id} name={resp['file_name']}")
+            file_item = schemas.FileItem(
+                storage="u115",
+                fileid=str(resp["file_id"]),
+                path=None,  # 通过ID获取时没有路径信息
+                type="file" if resp["file_category"] == "1" else "dir",
+                name=resp["file_name"],
+                basename=Path(resp["file_name"]).stem,
+                extension=Path(resp["file_name"]).suffix[1:]
+                if resp["file_category"] == "1"
+                else None,
+                pickcode=resp["pick_code"],
+                size=resp["size_byte"] if resp["file_category"] == "1" else None,
+                modify_time=resp["utime"],
+            )
+            return file_item
+        except Exception as e:
+            logger.debug(f"【P115Open】OpenAPI 通过ID获取文件信息失败 file_id={file_id}: {str(e)}")
+            return None
+
     def database_get_item(self, path: Path) -> Optional[schemas.FileItem]:
         """
         获取指定路径的文件/目录项 DataBase

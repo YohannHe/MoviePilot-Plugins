@@ -11,6 +11,7 @@ from ..core.message import post_message
 from ..core.scrape import media_scrape_metadata
 from ..core.cache import idpathcacher, pantransfercacher, lifeeventcacher
 from ..core.i18n import i18n
+from ..core.u115_open import U115OpenHelper
 from ..utils.path import PathUtils, PathRemoveUtils
 from ..utils.sentry import sentry_manager
 from ..utils.strm import StrmUrlGetter, StrmGenerater
@@ -69,6 +70,7 @@ class MonitorLife:
     def __init__(self, client: P115Client, mediainfodownloader: MediaInfoDownloader):
         self._client = client
         self.mediainfodownloader = mediainfodownloader
+        self.u115openhelper = U115OpenHelper()
 
         self._monitor_life_notification_timer = None
         self._monitor_life_notification_queue = defaultdict(
@@ -172,17 +174,17 @@ class MonitorLife:
         通过file_id获取最新文件信息（重新从API获取，确保文件名是最新的）
         """
         try:
-            resp = self._client.fs_info(file_id)
+            # 使用 OpenAPI 获取文件信息
+            file_item = self.u115openhelper.open_get_item_by_id(file_id)
             
-            if resp and resp.get('data'):
-                data = resp['data'][0] if isinstance(resp['data'], list) else resp['data']
+            if file_item:
                 return {
-                    'file_id': data.get('fid', file_id),
-                    'file_name': data.get('n', data.get('name', '')),
-                    'file_category': data.get('fc', data.get('file_category', file_category)),
-                    'parent_id': data.get('pid', data.get('cid', 0)),
-                    'file_size': data.get('s', data.get('size', 0)),
-                    'pick_code': data.get('pc', data.get('pickcode', ''))
+                    'file_id': int(file_item.fileid),
+                    'file_name': file_item.name,
+                    'file_category': 1 if file_item.type == 'file' else 0,
+                    'parent_id': 0,  # OpenAPI 通过ID获取时无法获取父目录ID
+                    'file_size': file_item.size or 0,
+                    'pick_code': file_item.pickcode
                 }
         except Exception as e:
             logger.warning(f"【监控生活事件】重新获取文件信息失败 file_id={file_id}: {e}")
