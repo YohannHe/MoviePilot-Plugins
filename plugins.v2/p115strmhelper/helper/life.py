@@ -329,6 +329,11 @@ class MonitorLife:
         """
         创建 STRM 文件
         """
+        logger.info(
+            f"【监控生活事件】🎬 creata_strm 开始 | file_path={file_path}, "
+            f"file_category={event.get('file_category')}, file_id={event.get('file_id')}"
+        )
+        
         _databasehelper = FileDbHelper()
 
         _get_url = StrmUrlGetter()
@@ -337,12 +342,26 @@ class MonitorLife:
         pickcode = event["pick_code"]
         file_category = event["file_category"]
         file_id = event["file_id"]
+        
+        monitor_life_paths = configer.get_config("monitor_life_paths")
+        logger.info(f"【监控生活事件】📋 monitor_life_paths 配置: {monitor_life_paths}")
+        
         status, target_dir, pan_media_dir = PathUtils.get_media_path(
-            configer.get_config("monitor_life_paths"), file_path
+            monitor_life_paths, file_path
         )
+        
+        logger.info(
+            f"【监控生活事件】🎯 路径匹配结果 | status={status}, "
+            f"target_dir={target_dir}, pan_media_dir={pan_media_dir}"
+        )
+        
         if not status:
+            logger.warning(
+                f"【监控生活事件】❌ 路径匹配失败，退出 creata_strm | "
+                f"file_path={file_path}, monitor_life_paths={monitor_life_paths}"
+            )
             return
-        logger.debug("【监控生活事件】匹配到网盘文件夹路径: %s", str(pan_media_dir))
+        logger.info("【监控生活事件】✅ 匹配到网盘文件夹路径: %s", str(pan_media_dir))
 
         if file_category == 0:
             # 文件夹情况，遍历文件夹
@@ -506,12 +525,18 @@ class MonitorLife:
                     ] += mediainfo_count
                     self._schedule_notification()
         else:
+            logger.info(f"【监控生活事件】📄 处理单文件 | file_id={event.get('file_id')}")
             _databasehelper.upsert_batch(
                 _databasehelper.process_life_file_item(
                     event=event, file_path=file_path.as_posix()
                 )
             )
-            if "creata" in configer.get_config("monitor_life_event_modes"):  # pylint: disable=E1135
+            
+            event_modes = configer.get_config("monitor_life_event_modes")
+            logger.info(f"【监控生活事件】🔧 event_modes 配置: {event_modes}")
+            
+            if "creata" in event_modes:  # pylint: disable=E1135
+                logger.info(f"【监控生活事件】✅ event_modes 包含 'creata'，继续处理")
                 # 文件情况，直接生成
                 file_path = Path(target_dir) / Path(file_path).relative_to(
                     pan_media_dir
@@ -520,6 +545,11 @@ class MonitorLife:
                 original_file_name = file_path.name
                 file_name = file_path.stem + ".strm"
                 new_file_path = file_target_dir / file_name
+                
+                logger.info(
+                    f"【监控生活事件】📝 本地文件路径 | original_file_name={original_file_name}, "
+                    f"new_file_path={new_file_path}"
+                )
 
                 if configer.get_config("monitor_life_auto_download_mediainfo_enabled"):
                     if file_path.suffix.lower() in self.download_mediaext_set:
@@ -570,42 +600,61 @@ class MonitorLife:
                             self._schedule_notification()
                         return
 
-                if file_path.suffix.lower() not in self.rmt_mediaext_set:
-                    logger.warn(
-                        "【监控生活事件】跳过网盘路径: %s",
+                file_suffix = file_path.suffix.lower()
+                logger.info(
+                    f"【监控生活事件】🔍 文件后缀检查 | suffix={file_suffix}, "
+                    f"rmt_mediaext_set={self.rmt_mediaext_set}"
+                )
+                
+                if file_suffix not in self.rmt_mediaext_set:
+                    logger.warning(
+                        f"【监控生活事件】❌ 文件后缀不在允许列表中，跳过网盘路径: %s",
                         str(file_path).replace(str(target_dir), "", 1),
                     )
                     return
+                
+                logger.info(f"【监控生活事件】✅ 文件后缀检查通过")
 
-                if not (
-                    result := StrmGenerater.should_generate_strm(
-                        original_file_name, "life", event.get("file_size", None)
-                    )
-                )[1]:
-                    logger.warn(
-                        f"【监控生活事件】{result[0]}，跳过网盘路径: {str(file_path).replace(str(target_dir), '', 1)}"
+                result = StrmGenerater.should_generate_strm(
+                    original_file_name, "life", event.get("file_size", None)
+                )
+                logger.info(
+                    f"【监控生活事件】🔍 STRM生成检查 | result={result[0] if result[0] else '通过'}, "
+                    f"should_generate={result[1]}, file_size={event.get('file_size')}"
+                )
+                
+                if not result[1]:
+                    logger.warning(
+                        f"【监控生活事件】❌ {result[0]}，跳过网盘路径: {str(file_path).replace(str(target_dir), '', 1)}"
                     )
                     return
+                
+                logger.info(f"【监控生活事件】✅ STRM生成检查通过，准备创建文件")
 
+                logger.info(f"【监控生活事件】📁 创建目标目录 | parent={new_file_path.parent}")
                 new_file_path.parent.mkdir(parents=True, exist_ok=True)
 
+                logger.info(f"【监控生活事件】🔑 pickcode 验证 | pickcode={pickcode}")
                 if not pickcode:
                     logger.error(
-                        f"【监控生活事件】{original_file_name} 不存在 pickcode 值，无法生成 STRM 文件"
+                        f"【监控生活事件】❌ {original_file_name} 不存在 pickcode 值，无法生成 STRM 文件"
                     )
                     return
                 if not (len(pickcode) == 17 and str(pickcode).isalnum()):
                     logger.error(
-                        f"【监控生活事件】错误的 pickcode 值 {pickcode}，无法生成 STRM 文件"
+                        f"【监控生活事件】❌ 错误的 pickcode 值 {pickcode}，无法生成 STRM 文件"
                     )
                     return
+                
+                logger.info(f"【监控生活事件】✅ pickcode 验证通过")
 
                 strm_url = _get_url.get_strm_url(pickcode, original_file_name)
+                logger.info(f"【监控生活事件】🔗 生成 STRM URL | url={strm_url[:100]}...")
 
                 with open(new_file_path, "w", encoding="utf-8") as file:
                     file.write(strm_url)
                 logger.info(
-                    "【监控生活事件】生成 STRM 文件成功: %s", str(new_file_path)
+                    "【监控生活事件】✅ 生成 STRM 文件成功: %s", str(new_file_path)
                 )
                 # 生成的STRM写入缓存，与整理事件对比
                 lifeeventcacher.create_strm_file_dict[str(event["file_id"])] = [
@@ -798,34 +847,87 @@ class MonitorLife:
         """
         # 1.获取绝对文件路径
         file_name = event["file_name"]
-        dir_path = self._get_path_by_cid(int(event["parent_id"]))
+        parent_id = int(event["parent_id"])
+        
+        logger.info(
+            f"【监控生活事件】🔍 new_creata_path 开始 | file_name={file_name}, "
+            f"parent_id={parent_id}, file_id={event.get('file_id')}"
+        )
+        
+        dir_path = self._get_path_by_cid(parent_id)
+        logger.info(f"【监控生活事件】📂 获取父目录路径 | parent_id={parent_id} -> dir_path={dir_path}")
+        
         file_path = Path(dir_path) / file_name
+        logger.info(f"【监控生活事件】📝 完整文件路径 | file_path={file_path}")
+        
         # 匹配逻辑 整理路径目录 > 生成STRM文件路径目录
         # 2.匹配是否为整理路径目录
-        if configer.get_config("pan_transfer_enabled") and configer.get_config(
-            "pan_transfer_paths"
-        ):
-            if PathUtils.get_run_transfer_path(
-                paths=configer.get_config("pan_transfer_paths"),
+        pan_transfer_enabled = configer.get_config("pan_transfer_enabled")
+        pan_transfer_paths = configer.get_config("pan_transfer_paths")
+        
+        logger.info(
+            f"【监控生活事件】🔧 整理路径配置 | enabled={pan_transfer_enabled}, "
+            f"has_paths={bool(pan_transfer_paths)}"
+        )
+        
+        if pan_transfer_enabled and pan_transfer_paths:
+            is_transfer_path = PathUtils.get_run_transfer_path(
+                paths=pan_transfer_paths,
                 transfer_path=file_path,
-            ):
+            )
+            logger.info(
+                f"【监控生活事件】🎯 整理路径匹配结果 | is_transfer_path={is_transfer_path}"
+            )
+            
+            if is_transfer_path:
+                logger.info(f"【监控生活事件】✅ 匹配到整理路径，调用 media_transfer")
                 self.media_transfer(
                     event=event,
                     file_path=Path(file_path),
                     rmt_mediaext=self.rmt_mediaext,
                 )
                 return
+        
         # 3.匹配是否为生成STRM文件路径目录
-        if configer.get_config("monitor_life_enabled") and configer.get_config(
-            "monitor_life_paths"
-        ):
-            if str(event["file_id"]) in pantransfercacher.creata_pan_transfer_list:
+        monitor_life_enabled = configer.get_config("monitor_life_enabled")
+        monitor_life_paths = configer.get_config("monitor_life_paths")
+        
+        logger.info(
+            f"【监控生活事件】🔧 监控生活配置 | enabled={monitor_life_enabled}, "
+            f"has_paths={bool(monitor_life_paths)}"
+        )
+        
+        if monitor_life_enabled and monitor_life_paths:
+            file_id_str = str(event["file_id"])
+            in_cache = file_id_str in pantransfercacher.creata_pan_transfer_list
+            event_modes = configer.get_config("monitor_life_event_modes")
+            
+            logger.info(
+                f"【监控生活事件】💾 缓存检查 | file_id={file_id_str}, "
+                f"in_cache={in_cache}, event_modes={event_modes}"
+            )
+            
+            if in_cache:
                 # 检查是否命中缓存
-                pantransfercacher.creata_pan_transfer_list.remove(str(event["file_id"]))
-                if "transfer" in configer.get_config("monitor_life_event_modes"):  # pylint: disable=E1135
+                pantransfercacher.creata_pan_transfer_list.remove(file_id_str)
+                logger.info(f"【监控生活事件】🎯 命中缓存，已从缓存移除")
+                
+                if "transfer" in event_modes:  # pylint: disable=E1135
+                    logger.info(f"【监控生活事件】✅ event_modes 包含 'transfer'，调用 creata_strm")
                     self.creata_strm(event=event, file_path=file_path)
+                else:
+                    logger.warning(
+                        f"【监控生活事件】❌ event_modes 不包含 'transfer'，跳过 creata_strm | "
+                        f"event_modes={event_modes}"
+                    )
             else:
+                logger.info(f"【监控生活事件】🎯 未命中缓存，直接调用 creata_strm")
                 self.creata_strm(event=event, file_path=file_path)
+        else:
+            logger.warning(
+                f"【监控生活事件】❌ 监控生活配置未启用或路径为空，跳过处理 | "
+                f"enabled={monitor_life_enabled}, has_paths={bool(monitor_life_paths)}"
+            )
 
     def once_pull(self, from_time, from_id):
         """
@@ -944,6 +1046,12 @@ class MonitorLife:
                 # 对于单文件事件（file_category != 0），重新获取最新文件信息
                 if event.get('file_category') != 0:
                     try:
+                        original_parent_id = event.get('parent_id')
+                        logger.info(
+                            f"【监控生活事件】🔄 准备重新获取最新文件信息 | "
+                            f"file_id={event['file_id']}, original_parent_id={original_parent_id}"
+                        )
+                        
                         latest_info = self._get_latest_file_info(
                             int(event['file_id']), 
                             int(event['file_category'])
@@ -951,14 +1059,28 @@ class MonitorLife:
                         if latest_info:
                             # 更新事件中的文件名等信息
                             old_name = event.get('file_name')
+                            old_pickcode = event.get('pick_code')
+                            old_size = event.get('file_size')
+                            
                             event['file_name'] = latest_info['file_name']
                             event['pick_code'] = latest_info.get('pick_code', event.get('pick_code'))
                             event['file_size'] = latest_info.get('file_size', event.get('file_size'))
+                            # 注意：不更新 parent_id，保留原始值
+                            
+                            logger.info(
+                                f"【监控生活事件】📊 文件信息对比 | "
+                                f"name: {old_name} -> {event['file_name']}, "
+                                f"pickcode: {old_pickcode} -> {event['pick_code']}, "
+                                f"size: {old_size} -> {event['file_size']}, "
+                                f"parent_id保持: {event.get('parent_id')}"
+                            )
                             
                             if old_name != event['file_name']:
                                 logger.info(
-                                    f"【监控生活事件】检测到文件名变化: {old_name} -> {event['file_name']}"
+                                    f"【监控生活事件】⚠️ 检测到文件名变化: {old_name} -> {event['file_name']}"
                                 )
+                        else:
+                            logger.warning(f"【监控生活事件】⚠️ 未获取到最新文件信息，使用原始事件数据")
                     except Exception as e:
                         logger.warning(f"【监控生活事件】获取最新文件信息异常: {e}")
 
